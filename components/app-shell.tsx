@@ -11,16 +11,18 @@ import {
   FolderTree,
   KeyRound,
   LogOut,
-  Settings
+  Settings,
+  UserPlus
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { useState } from "react";
 
 const nav = [
-  { href: "/automation", label: "Automatizacion", icon: ClipboardList },
+  { href: "/automation", label: "Carga academica", icon: ClipboardList },
   { href: "/analytics", label: "Analitica", icon: BarChart3 },
   { href: "/categories", label: "Categorias", icon: FolderTree },
   { href: "/courses", label: "Cursos", icon: BookOpen },
+  { href: "/enrolments/course", label: "Matricular", icon: UserPlus },
   { href: "/settings/moodle", label: "Moodle", icon: Settings }
 ];
 

@@ -41,6 +41,7 @@ export default function NewCoursePage() {
       enddate: String(data.get("enddate") ?? "") || null,
       visible: data.get("visible") === "on",
       numsections: Number(data.get("numsections") ?? 10),
+      template_shortname: String(data.get("template_shortname") ?? "").trim() || null,
       modality: String(data.get("modality") ?? "").trim() || null,
       activity_type: String(data.get("activity_type") ?? "").trim() || null,
       academic_period: String(data.get("academic_period") ?? "").trim() || null,
@@ -125,6 +126,15 @@ export default function NewCoursePage() {
               <input
                 name="idnumber"
                 maxLength={120}
+                className="mt-1 h-10 w-full rounded border border-slate-300 px-3"
+              />
+            </label>
+            <label className="text-sm font-medium text-slate-700">
+              Plantilla base
+              <input
+                name="template_shortname"
+                maxLength={120}
+                placeholder="PBASE2025"
                 className="mt-1 h-10 w-full rounded border border-slate-300 px-3"
               />
             </label>

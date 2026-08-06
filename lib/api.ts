@@ -1,5 +1,10 @@
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
+export const MOODLE_BASE_URL = (process.env.NEXT_PUBLIC_MOODLE_BASE_URL ?? "").replace(/\/$/, "");
+
+export function moodleCourseUrl(moodleId?: number | null) {
+  return moodleId && MOODLE_BASE_URL ? `${MOODLE_BASE_URL}/course/view.php?id=${moodleId}` : null;
+}
 
 export type CurrentUser = {
   id: string;
@@ -174,14 +179,115 @@ export type CourseCreateResult = {
   warnings: string[];
 };
 
+export type CourseListItem = {
+  moodle_id: number;
+  fullname: string;
+  shortname: string;
+  idnumber?: string | null;
+  category_moodle_id?: number | null;
+  category_path: string[];
+  visible: boolean;
+  active: boolean;
+  modality?: string | null;
+  teacher_count: number;
+  student_count: number;
+  teacher_names: string[];
+  teacher_emails: string[];
+  last_activity_at?: string | null;
+  captured_at: string;
+  source: string;
+  data_quality: string;
+};
+
+export type CourseParticipant = {
+  moodle_id: number;
+  fullname: string;
+  email?: string | null;
+  username?: string | null;
+  auth_method?: string | null;
+  roles: string[];
+  last_site_access_at?: string | null;
+  last_course_access_at?: string | null;
+  has_access: boolean;
+};
+
+export type CourseDetail = CourseListItem & {
+  participants: CourseParticipant[];
+  access_message?: string | null;
+};
+
+export type CoursePasswordResetResult = {
+  user_id: number;
+  fullname: string;
+  username?: string | null;
+  temporary_password: string;
+  email_sent: boolean;
+  email_message?: string | null;
+};
+
+export type CourseEnrolmentPerson = {
+  fullname: string;
+  email: string;
+};
+
+export type CourseEnrolmentPreviewResult = {
+  course_id: number;
+  total: number;
+  ready: number;
+  existing: number;
+  openid: number;
+  will_create: number;
+  already_enrolled: number;
+  pending_identity: number;
+  invalid: number;
+  can_execute: boolean;
+  items: Array<{
+    fullname: string;
+    email: string;
+    action: string;
+    can_process: boolean;
+    moodle_user_id?: number | null;
+    auth_method?: string | null;
+    already_enrolled: boolean;
+    message: string;
+  }>;
+};
+
+export type CourseEnrolmentResult = {
+  course_id: number;
+  total: number;
+  created: number;
+  enrolled: number;
+  already_enrolled: number;
+  skipped: number;
+  failed: number;
+  items: Array<{
+    fullname: string;
+    email: string;
+    status: string;
+    moodle_user_id?: number | null;
+    auth_method?: string | null;
+    password_sent: boolean;
+    message: string;
+  }>;
+};
+
+export type EmailTestResult = {
+  status: string;
+  message: string;
+};
+
 export type AcademicPlanningRow = {
   period: string;
   area?: string | null;
   career: string;
-  semester: string;
+  semester?: string | null;
+  anio?: string | null;
   subject: string;
   group: string;
   teacher_name?: string | null;
+  teacher_firstname?: string | null;
+  teacher_lastname?: string | null;
   teacher_email?: string | null;
   teacher_enrolment_key?: string | null;
   student_name?: string | null;
@@ -265,7 +371,22 @@ export type AutomationCourseJobStatus = {
   started_at?: string | null;
   finished_at?: string | null;
   error_message?: string | null;
-  items: Array<{ key: string; fullname: string; shortname: string; status: string; message?: string | null }>;
+  retry_of_job_id?: string | null;
+  items: Array<{
+    key: string;
+    fullname: string;
+    shortname: string;
+    idnumber?: string | null;
+    category_path: string[];
+    category_moodle_id?: number | null;
+    moodle_id?: number | null;
+    status: string;
+    message?: string | null;
+    teacher_total: number;
+    teacher_enrolled: number;
+    teacher_skipped: number;
+    teacher_failed: number;
+  }>;
 };
 
 export type DuplicateCourseOption = {
@@ -274,6 +395,7 @@ export type DuplicateCourseOption = {
   shortname: string;
   idnumber?: string | null;
   visible: boolean;
+  teacher_names: string[];
 };
 
 export type BulkDuplicatePreviewRequest = {
@@ -283,12 +405,15 @@ export type BulkDuplicatePreviewRequest = {
   shortname_prefix: string;
   shortname_suffix: string;
   new_subcategory_name?: string | null;
+  copy_fullnames: Record<number, string>;
 };
 
 export type BulkDuplicatePreviewItem = {
   course_id: number;
+  moodle_id?: number | null;
   original_fullname: string;
   original_shortname: string;
+  teacher_names: string[];
   copy_fullname: string;
   copy_shortname: string;
   destination_path: string[];

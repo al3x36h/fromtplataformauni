@@ -9,13 +9,15 @@ type Props = {
   value?: number | null;
   onChange: (category: CategoryNode | null) => void;
   label?: string;
+  compact?: boolean;
 };
 
 export function CategoryTreeCombobox({
   categories,
   value,
   onChange,
-  label = "Categoria padre"
+  label = "Categoria padre",
+  compact = false
 }: Props) {
   const [search, setSearch] = useState("");
   const [showVisible, setShowVisible] = useState(true);
@@ -38,7 +40,7 @@ export function CategoryTreeCombobox({
   );
 
   return (
-    <div className="space-y-2">
+    <div className={compact ? "space-y-1.5" : "space-y-2"}>
       <div className="flex items-end justify-between gap-3">
         <label className="block flex-1 text-sm font-medium text-slate-700">
           {label}
@@ -47,7 +49,7 @@ export function CategoryTreeCombobox({
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Buscar por nombre, ruta o idnumber"
-            className="mt-1 h-10 w-full rounded border border-slate-300 px-3 text-sm"
+            className={`${compact ? "h-9" : "h-10"} mt-1 w-full rounded border border-slate-300 px-3 text-sm`}
           />
         </label>
         <button
@@ -56,7 +58,7 @@ export function CategoryTreeCombobox({
             setSearch("");
             onChange(null);
           }}
-          className="flex h-10 cursor-pointer items-center gap-2 rounded border border-slate-300 px-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+          className={`flex ${compact ? "h-9 px-2" : "h-10 px-3"} cursor-pointer items-center gap-2 rounded border border-slate-300 text-sm font-semibold text-slate-700 hover:bg-slate-100`}
         >
           <RotateCcw className="h-4 w-4" />
           Limpiar
@@ -64,14 +66,14 @@ export function CategoryTreeCombobox({
       </div>
 
       {selected && (
-        <div className="rounded border border-institutional-extralightblue bg-blue-50 px-3 py-2 text-sm text-institutional-darkblue">
-          <p className="font-semibold">Categoria seleccionada</p>
-          <p className="mt-1">{selected.path.join(" / ")}</p>
+        <div className={`rounded border border-institutional-extralightblue bg-blue-50 px-3 ${compact ? "py-1.5" : "py-2"} text-sm text-institutional-darkblue`}>
+          <p className="font-semibold">{compact ? "Seleccionada" : "Categoria seleccionada"}</p>
+          <p className="mt-0.5 truncate">{selected.path.join(" / ")}</p>
           {!selected.visible && <p className="mt-1 text-xs font-semibold text-red-700">Categoria oculta</p>}
         </div>
       )}
 
-      <div className="flex flex-wrap gap-3 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+      <div className={`flex flex-wrap gap-3 rounded border border-slate-200 bg-slate-50 px-3 ${compact ? "py-1.5 text-xs" : "py-2 text-sm"} text-slate-700`}>
         <label className="flex cursor-pointer items-center gap-2">
           <input
             type="checkbox"
@@ -92,7 +94,7 @@ export function CategoryTreeCombobox({
         </label>
       </div>
 
-      <div className="max-h-72 overflow-auto rounded border border-slate-200 bg-white">
+      <div className={`${compact ? "max-h-48" : "max-h-72"} overflow-auto rounded border border-slate-200 bg-white`}>
         {filtered.map((category) => {
           const active = category.moodle_id === value;
           return (
@@ -100,7 +102,7 @@ export function CategoryTreeCombobox({
               key={category.id}
               type="button"
               onClick={() => onChange(category)}
-              className={`flex w-full cursor-pointer items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 text-left text-sm text-slate-800 transition-colors last:border-b-0 hover:bg-blue-50 ${
+              className={`flex w-full cursor-pointer items-center justify-between gap-3 border-b border-slate-100 px-3 ${compact ? "py-1.5" : "py-2"} text-left text-sm text-slate-800 transition-colors last:border-b-0 hover:bg-blue-50 ${
                 active ? "border-l-4 border-l-institutional-primary bg-blue-50" : ""
               }`}
             >

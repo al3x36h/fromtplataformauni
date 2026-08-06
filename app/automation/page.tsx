@@ -5,6 +5,7 @@ import { BulkDuplication } from "@/components/automation/bulk-duplication";
 import {
   API_BASE_URL,
   apiFetch,
+  moodleCourseUrl,
   type AcademicPlanningRow,
   type AutomationCategoryExecutionResult,
   type AutomationCourseJobStatus,
@@ -13,9 +14,9 @@ import {
 import { Clipboard, ClipboardCheck, Download, FolderPlus, Play, RefreshCw, Search } from "lucide-react";
 import { useEffect, useState } from "react";
 
-const baseHeaders = ["period", "area", "career", "semester", "subject", "group"];
+const baseHeaders = ["period", "area", "career", "anio", "subject", "group"];
 const templateHeaders = ["template_shortname"];
-const teacherIdentityHeaders = ["teacher_email"];
+const teacherIdentityHeaders = ["teacher_firstname", "teacher_lastname", "teacher_email"];
 const defaultTemplateShortname = "PBASE2025";
 
 const sample = buildSample({
@@ -24,7 +25,7 @@ const sample = buildSample({
 });
 
 export default function AutomationPage() {
-  const [activeTab, setActiveTab] = useState<"planning" | "duplication">("planning");
+  const [activeTab, setActiveTab] = useState<"planning" | "preview" | "executions" | "duplication">("planning");
   const [raw, setRaw] = useState(sample);
   const [preview, setPreview] = useState<AutomationPreviewResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -32,7 +33,10 @@ export default function AutomationPage() {
   const [syncingCategories, setSyncingCategories] = useState(false);
   const [creatingCategories, setCreatingCategories] = useState(false);
   const [creatingCourses, setCreatingCourses] = useState(false);
+  const [loadingLatestJob, setLoadingLatestJob] = useState(false);
+  const [latestJobChecked, setLatestJobChecked] = useState(false);
   const [courseJob, setCourseJob] = useState<AutomationCourseJobStatus | null>(null);
+  const [courseJobHistory, setCourseJobHistory] = useState<AutomationCourseJobStatus[]>([]);
   const [selectedCategoryPaths, setSelectedCategoryPaths] = useState<Set<string>>(new Set());
   const [selectedCourseKeys, setSelectedCourseKeys] = useState<Set<string>>(new Set());
   const [directTeachers, setDirectTeachers] = useState(true);
@@ -61,12 +65,12 @@ export default function AutomationPage() {
     setLoading(true);
     setError(null);
     try {
-      applyPreview(
-        await apiFetch<AutomationPreviewResult>("/automation/preview", {
+      const nextPreview = await apiFetch<AutomationPreviewResult>("/automation/preview", {
           method: "POST",
           body: JSON.stringify({ rows: currentRows() })
-        })
-      );
+        });
+      applyPreview(nextPreview);
+      setActiveTab("preview");
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo generar la vista previa");
     } finally {
@@ -100,7 +104,7 @@ export default function AutomationPage() {
     setSyncingCategories(true);
     setError(null);
     try {
-      await apiFetch("/categories/sync", { method: "POST" });
+      await apiFetch("/categories/tree?refresh=true");
       applyPreview(
         await apiFetch<AutomationPreviewResult>("/automation/preview", {
           method: "POST",
@@ -127,9 +131,62 @@ export default function AutomationPage() {
         body: JSON.stringify({ rows: currentRows(), course_keys: courseKeys })
       });
       setCourseJob(job);
+      await loadCourseJobHistory();
+      setActiveTab("executions");
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudieron crear los cursos seleccionados");
       setCreatingCourses(false);
+    }
+  }
+
+  async function retryFailedCourses() {
+    if (!courseJob || courseJob.failed === 0) return;
+    setCreatingCourses(true);
+    setError(null);
+    try {
+      setCourseJob(
+        await apiFetch<AutomationCourseJobStatus>(`/automation/courses/jobs/${courseJob.id}/retry`, {
+          method: "POST"
+        })
+      );
+      await loadCourseJobHistory();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo reintentar el lote");
+      setCreatingCourses(false);
+    }
+  }
+
+  async function loadCourseJobHistory() {
+    setCourseJobHistory(await apiFetch<AutomationCourseJobStatus[]>("/automation/courses/jobs"));
+  }
+
+  async function loadLatestCourseJob() {
+    setLoadingLatestJob(true);
+    try {
+      const [latest, history] = await Promise.all([
+        apiFetch<AutomationCourseJobStatus>("/automation/courses/jobs/latest"),
+        apiFetch<AutomationCourseJobStatus[]>("/automation/courses/jobs")
+      ]);
+      setCourseJob(latest);
+      setCourseJobHistory(history);
+    } catch {
+      setCourseJob(null);
+      setCourseJobHistory([]);
+    } finally {
+      setLatestJobChecked(true);
+      setLoadingLatestJob(false);
+    }
+  }
+
+  async function openCourseJob(jobId: string) {
+    setLoadingLatestJob(true);
+    setError(null);
+    try {
+      setCourseJob(await apiFetch<AutomationCourseJobStatus>(`/automation/courses/jobs/${jobId}`));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo abrir la ejecucion");
+    } finally {
+      setLoadingLatestJob(false);
     }
   }
 
@@ -143,6 +200,10 @@ export default function AutomationPage() {
       setError("No se pudieron copiar los encabezados. Copialos manualmente desde la lista mostrada.");
     }
   }
+
+  useEffect(() => {
+    loadLatestCourseJob();
+  }, []);
 
   useEffect(() => {
     if (!courseJob || !["queued", "processing"].includes(courseJob.status)) return;
@@ -176,9 +237,9 @@ export default function AutomationPage() {
   }, [courseJob?.id, courseJob?.status]);
 
   return (
-    <AppShell title="Automatizacion academica">
+    <AppShell title="Carga academica">
       <div className="space-y-5">
-        <div className="flex gap-2 rounded border border-slate-200 bg-white p-1 shadow-sm">
+        <div className="flex flex-wrap gap-2 rounded border border-slate-200 bg-white p-1 shadow-sm">
           <button
             type="button"
             onClick={() => setActiveTab("planning")}
@@ -192,6 +253,28 @@ export default function AutomationPage() {
           </button>
           <button
             type="button"
+            onClick={() => setActiveTab("preview")}
+            className={`h-10 cursor-pointer rounded px-4 text-sm font-semibold ${
+              activeTab === "preview"
+                ? "bg-institutional-primary text-white"
+                : "text-slate-700 hover:bg-slate-100"
+            }`}
+          >
+            Vista previa
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("executions")}
+            className={`h-10 cursor-pointer rounded px-4 text-sm font-semibold ${
+              activeTab === "executions"
+                ? "bg-institutional-primary text-white"
+                : "text-slate-700 hover:bg-slate-100"
+            }`}
+          >
+            Ejecuciones
+          </button>
+          <button
+            type="button"
             onClick={() => setActiveTab("duplication")}
             className={`h-10 cursor-pointer rounded px-4 text-sm font-semibold ${
               activeTab === "duplication"
@@ -199,12 +282,23 @@ export default function AutomationPage() {
                 : "text-slate-700 hover:bg-slate-100"
             }`}
           >
-            Duplicacion masiva
+            Duplicar cursos
           </button>
         </div>
-        {activeTab === "duplication" ? (
-          <BulkDuplication />
-        ) : (
+        {activeTab === "duplication" && <BulkDuplication />}
+        {activeTab === "executions" && (
+          <ExecutionsPanel
+            job={courseJob}
+            creating={creatingCourses}
+            loading={loadingLatestJob}
+            checked={latestJobChecked}
+            history={courseJobHistory}
+            onRefresh={loadLatestCourseJob}
+            onOpenJob={openCourseJob}
+            onRetry={retryFailedCourses}
+          />
+        )}
+        {activeTab === "planning" && (
           <>
         <section className="rounded border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-start gap-3">
@@ -357,7 +451,10 @@ export default function AutomationPage() {
             )}
           </aside>
         </section>
-
+          </>
+        )}
+        {activeTab === "preview" && (
+          <>
         {preview && (
           <section className="space-y-5">
             {preview.warnings.length > 0 && (
@@ -380,7 +477,7 @@ export default function AutomationPage() {
                       className="flex h-10 min-w-0 cursor-pointer items-center justify-center gap-2 rounded border border-amber-300 bg-white px-3 text-sm font-semibold text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-70"
                     >
                       <RefreshCw className="h-4 w-4" />
-                      <span className="truncate">{syncingCategories ? "Actualizando..." : "Actualizar desde Moodle"}</span>
+                      <span className="truncate">{syncingCategories ? "Actualizando..." : "Refrescar desde Moodle"}</span>
                     </button>
                     <button
                       type="button"
@@ -420,13 +517,17 @@ export default function AutomationPage() {
               preview={preview}
               creating={creatingCourses}
               selected={selectedCourseKeys}
-              job={courseJob}
               directTeachers={directTeachers}
               studentSelfEnrolment={studentSelfEnrolment}
               teacherSelfEnrolment={teacherSelfEnrolment}
               onChange={setSelectedCourseKeys}
               onCreate={createSelectedCourses}
             />
+          </section>
+        )}
+        {!preview && (
+          <section className="rounded border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600 shadow-sm">
+            Genera una vista previa desde Planificacion academica para revisar categorias, cursos y docentes.
           </section>
         )}
           </>
@@ -525,7 +626,6 @@ function CourseVerification({
   preview,
   creating,
   selected,
-  job,
   directTeachers,
   studentSelfEnrolment,
   teacherSelfEnrolment,
@@ -535,7 +635,6 @@ function CourseVerification({
   preview: AutomationPreviewResult;
   creating: boolean;
   selected: Set<string>;
-  job: AutomationCourseJobStatus | null;
   directTeachers: boolean;
   studentSelfEnrolment: boolean;
   teacherSelfEnrolment: boolean;
@@ -593,20 +692,6 @@ function CourseVerification({
           </button>
         </div>
       </div>
-      {creating && job && (
-        <div className="rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
-          <div className="flex items-center justify-between gap-3">
-            <span className="font-semibold">Creando cursos seleccionados</span>
-            <span>
-              {job.processed}/{job.total} procesados
-            </span>
-          </div>
-          <div className="mt-2 h-2 overflow-hidden rounded bg-blue-100">
-            <div className="h-full rounded bg-institutional-primary transition-all" style={{ width: `${job.percent}%` }} />
-          </div>
-        </div>
-      )}
-      {job && <CourseExecutionSummary job={job} />}
       {preview.courses.map((course) => {
         const teachers = preview.teacher_assignments
           .filter((assignment) => assignment.course_key === course.key)
@@ -692,23 +777,166 @@ function CourseVerification({
   );
 }
 
-function CourseExecutionSummary({ job }: { job: AutomationCourseJobStatus }) {
-  const rows = job.items;
-  const canDownload = !["queued", "processing"].includes(job.status) && rows.length > 0;
+function ExecutionsPanel({
+  job,
+  creating,
+  loading,
+  checked,
+  history,
+  onRefresh,
+  onOpenJob,
+  onRetry
+}: {
+  job: AutomationCourseJobStatus | null;
+  creating: boolean;
+  loading: boolean;
+  checked: boolean;
+  history: AutomationCourseJobStatus[];
+  onRefresh: () => void;
+  onOpenJob: (jobId: string) => void;
+  onRetry: () => void;
+}) {
   return (
     <section className="rounded border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
+        <div>
+          <h3 className="text-base font-semibold text-slate-950">Ejecuciones</h3>
+          <p className="text-sm text-slate-600">Historial de lotes y detalle de resultados.</p>
+        </div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={loading}
+          className="flex h-9 cursor-pointer items-center justify-center gap-2 rounded border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          {loading ? "Consultando..." : "Ver ultima ejecucion"}
+        </button>
+      </div>
+      <div className="mt-4 grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+        <div className="rounded border border-slate-200 bg-slate-50 p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h4 className="text-sm font-semibold text-slate-900">Historial</h4>
+            <span className="text-xs text-slate-500">{history.length} lotes</span>
+          </div>
+          {history.length > 0 ? (
+            <div className="max-h-[520px] space-y-2 overflow-auto pr-1">
+              {history.slice(0, 20).map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => onOpenJob(item.id)}
+                  className={`w-full cursor-pointer rounded border p-2 text-left transition-colors ${
+                    job?.id === item.id
+                      ? "border-institutional-primary bg-white shadow-sm"
+                      : "border-slate-200 bg-white hover:bg-slate-50"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-semibold text-slate-900">Lote {item.id.slice(0, 8)}</p>
+                      <p className="mt-0.5 text-xs text-slate-500">{formatDateTime(item.started_at)}</p>
+                    </div>
+                    <span className={`shrink-0 rounded px-2 py-1 text-[11px] font-semibold ${statusBadgeClass(item.status)}`}>
+                      {statusLabel(item.status)}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-600">
+                    {item.total} total · {item.created} creados · {item.failed} fallidos
+                  </p>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="rounded border border-dashed border-slate-300 bg-white px-3 py-3 text-sm text-slate-600">
+              {checked ? "Sin ejecuciones guardadas." : "Buscando ejecuciones..."}
+            </p>
+          )}
+        </div>
+        {job ? (
+          <CourseExecutionSummary job={job} creating={creating} onRetry={onRetry} />
+        ) : (
+          <div className="rounded border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+            Selecciona un lote del historial para ver el detalle.
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function CourseExecutionSummary({
+  job,
+  creating,
+  onRetry
+}: {
+  job: AutomationCourseJobStatus;
+  creating: boolean;
+  onRetry: () => void;
+}) {
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
+  const query = searchTerm.trim().toLowerCase();
+  const filteredRows = job.items.filter((item) => {
+    const matchesStatus = statusFilter === "all" || item.status === statusFilter;
+    const matchesQuery =
+      !query ||
+      item.fullname.toLowerCase().includes(query) ||
+      item.shortname.toLowerCase().includes(query) ||
+      String(item.moodle_id ?? "").includes(query);
+    return matchesStatus && matchesQuery;
+  });
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const rows = filteredRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const canDownload = !["queued", "processing"].includes(job.status) && job.items.length > 0;
+  const canRetry = !["queued", "processing"].includes(job.status) && job.failed > 0;
+  const filterOptions = [
+    { value: "all", label: "Todos", count: job.items.length },
+    { value: "created", label: "Creados", count: job.created },
+    { value: "failed", label: "Fallidos", count: job.failed },
+    { value: "skipped", label: "Omitidos", count: job.skipped }
+  ];
+
+  function changeStatusFilter(value: string) {
+    setStatusFilter(value);
+    setPage(1);
+  }
+
+  function changeSearchTerm(value: string) {
+    setSearchTerm(value);
+    setPage(1);
+  }
+
+  return (
+    <section className="rounded border border-slate-200 bg-white p-4">
       <div className="flex flex-col justify-between gap-2 md:flex-row md:items-center">
         <div>
-          <h4 className="text-sm font-semibold text-slate-950">Resultado de creacion</h4>
+          <h4 className="text-sm font-semibold text-slate-950">Detalle del lote seleccionado</h4>
           <p className="text-sm text-slate-600">
-            {job.created} creados · {job.failed} fallidos · {job.skipped} omitidos
+            {job.processed}/{job.total} procesados · {job.created} creados · {job.failed} fallidos ·{" "}
+            {job.skipped} omitidos
           </p>
+          {job.retry_of_job_id && <p className="text-xs text-slate-500">Reintento de lote anterior.</p>}
         </div>
         <div className="flex items-center gap-2">
+          {canRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              disabled={creating}
+              className="flex h-8 cursor-pointer items-center gap-2 rounded border border-red-200 bg-red-50 px-3 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Reintentar fallidos
+            </button>
+          )}
           {canDownload && (
             <a
               href={`${API_BASE_URL}/automation/courses/jobs/${job.id}/report`}
-              className="rounded border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+              className="flex h-8 items-center rounded border border-slate-300 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100"
             >
               Descargar reporte
             </a>
@@ -718,41 +946,140 @@ function CourseExecutionSummary({ job }: { job: AutomationCourseJobStatus }) {
           </span>
         </div>
       </div>
+      {["queued", "processing"].includes(job.status) && (
+        <div className="mt-3 h-1.5 overflow-hidden rounded bg-slate-100">
+          <div className="h-full rounded bg-institutional-primary transition-all" style={{ width: `${job.percent}%` }} />
+        </div>
+      )}
       {job.error_message && <p className="mt-2 text-sm text-red-700">{job.error_message}</p>}
-      <div className="mt-3 overflow-x-auto">
-        <table className="w-full min-w-[680px] border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-slate-200 text-left text-slate-600">
-              <th className="py-2 pr-4 font-semibold">Curso</th>
-              <th className="py-2 pr-4 font-semibold">Shortname</th>
-              <th className="py-2 pr-4 font-semibold">Estado</th>
-              <th className="py-2 pr-4 font-semibold">Detalle</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((item) => (
-              <tr key={`${item.key}:${item.status}`} className="border-b border-slate-100">
-                <td className="py-2 pr-4">{item.fullname}</td>
-                <td className="py-2 pr-4 font-mono text-xs">{item.shortname}</td>
-                <td className="py-2 pr-4">
-                  <span
-                    className={`rounded px-2 py-1 text-xs font-semibold ${
-                      item.status === "created"
-                        ? "bg-green-100 text-green-800"
-                        : item.status === "failed"
-                          ? "bg-red-100 text-red-800"
-                          : "bg-amber-100 text-amber-800"
-                    }`}
-                  >
-                    {statusLabel(item.status)}
-                  </span>
-                </td>
-                <td className="py-2 pr-4 text-slate-600">{item.message ?? "Confirmado por Moodle"}</td>
-              </tr>
+      {job.items.length > 0 && (
+        <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap gap-2">
+            {filterOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => changeStatusFilter(option.value)}
+                className={`h-8 cursor-pointer rounded border px-3 text-xs font-semibold transition-colors ${
+                  statusFilter === option.value
+                    ? "border-institutional-primary bg-institutional-primary text-white"
+                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                {option.label} ({option.count})
+              </button>
             ))}
-          </tbody>
-        </table>
+          </div>
+          <label className="relative block lg:w-80">
+            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+            <input
+              type="search"
+              value={searchTerm}
+              onChange={(event) => changeSearchTerm(event.target.value)}
+              placeholder="Buscar curso, shortname o ID"
+              className="h-9 w-full rounded border border-slate-300 pl-9 pr-3 text-sm text-slate-800 outline-none focus:border-institutional-primary focus:ring-1 focus:ring-institutional-primary"
+            />
+          </label>
+        </div>
+      )}
+      <div className="mt-3 space-y-2">
+        {rows.map((item) => {
+          const courseUrl = moodleCourseUrl(item.moodle_id);
+          return (
+            <article
+              key={`${job.id}:${item.key}:${item.status}`}
+              className="rounded border border-slate-200 bg-white p-3 shadow-sm"
+            >
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`rounded px-2 py-1 text-xs font-semibold ${statusBadgeClass(item.status)}`}>
+                      {statusLabel(item.status)}
+                    </span>
+                    <h5 className="min-w-0 text-sm font-semibold leading-5 text-slate-950">{item.fullname}</h5>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                    <span className="font-mono text-slate-700">{item.shortname}</span>
+                    {item.idnumber && <span className="max-w-full truncate">IDNumber: {item.idnumber}</span>}
+                    {item.category_path.length > 0 && (
+                      <span className="max-w-full truncate">{item.category_path.join(" / ")}</span>
+                    )}
+                  </div>
+                </div>
+                <div className="grid shrink-0 grid-cols-2 gap-2 text-xs sm:grid-cols-3 lg:w-[360px]">
+                  <div className="rounded bg-slate-50 px-2 py-1.5">
+                    <span className="block text-slate-500">Moodle</span>
+                    <span className="font-semibold text-slate-900">{item.moodle_id ? `ID ${item.moodle_id}` : "-"}</span>
+                    {item.category_moodle_id && <span className="ml-1 text-slate-500">Cat. {item.category_moodle_id}</span>}
+                  </div>
+                  <div className="rounded bg-slate-50 px-2 py-1.5">
+                    <span className="block text-slate-500">Docentes</span>
+                    <span className={item.teacher_failed > 0 ? "font-semibold text-red-700" : "font-semibold text-slate-900"}>
+                      {item.teacher_total > 0
+                        ? `${item.teacher_enrolled}/${item.teacher_total}`
+                        : "-"}
+                    </span>
+                    {item.teacher_skipped > 0 && <span className="ml-1 text-slate-500">+{item.teacher_skipped}</span>}
+                  </div>
+                  <div className="col-span-2 flex items-center justify-start rounded bg-slate-50 px-2 py-1.5 sm:col-span-1">
+                    {courseUrl ? (
+                      <a
+                        href={courseUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex h-7 items-center rounded border border-slate-300 bg-white px-2 font-semibold text-institutional-primary hover:bg-slate-100"
+                      >
+                        Abrir curso
+                      </a>
+                    ) : (
+                      <span className="text-slate-500">Sin enlace</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              {item.message && item.message !== "Confirmado por Moodle" && (
+                <p className="mt-3 rounded bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">{item.message}</p>
+              )}
+            </article>
+          );
+        })}
+        {filteredRows.length === 0 && (
+          <div className="rounded border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+            {job.items.length === 0
+              ? "Todavia no hay cursos procesados en este lote."
+              : "No hay cursos que coincidan con el filtro actual."}
+          </div>
+        )}
       </div>
+      {filteredRows.length > pageSize && (
+        <div className="mt-3 flex flex-col gap-2 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
+          <span>
+            Mostrando {(currentPage - 1) * pageSize + 1}-{Math.min(currentPage * pageSize, filteredRows.length)} de{" "}
+            {filteredRows.length}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPage(Math.max(1, currentPage - 1))}
+              disabled={currentPage === 1}
+              className="h-8 cursor-pointer rounded border border-slate-300 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Anterior
+            </button>
+            <span className="text-xs font-semibold text-slate-500">
+              Pagina {currentPage} de {totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => setPage(Math.min(totalPages, currentPage + 1))}
+              disabled={currentPage === totalPages}
+              className="h-8 cursor-pointer rounded border border-slate-300 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Siguiente
+            </button>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -821,10 +1148,13 @@ function parsePlanningRows(raw: string): AcademicPlanningRow[] {
       period: record.period,
       area: record.area || null,
       career: record.career,
-      semester: record.semester,
+      semester: record.semester || record.anio,
+      anio: record.anio || record.semester,
       subject: record.subject,
       group: record.group,
       teacher_name: record.teacher_name || null,
+      teacher_firstname: record.teacher_firstname || null,
+      teacher_lastname: record.teacher_lastname || null,
       teacher_email: record.teacher_email || null,
       teacher_enrolment_key: record.teacher_enrolment_key || null,
       student_name: record.student_name || null,
@@ -931,15 +1261,19 @@ function sampleRecord(values: {
   subject?: string;
   group?: string;
   teacherEmail: string;
+  teacherFirstname?: string;
+  teacherLastname?: string;
 }): Record<string, string> {
   return {
     period: "I Semestre 2026",
     area: values.area ?? "DACIP",
     career: values.career ?? "Ingenieria en Sistemas",
-    semester: "III Año",
+    anio: "III anio",
     subject: values.subject ?? "Teoria de la Computacion",
     group: values.group ?? "3T6-COM-S",
     template_shortname: defaultTemplateShortname,
+    teacher_firstname: values.teacherFirstname ?? "Martin",
+    teacher_lastname: values.teacherLastname ?? "Moreno",
     teacher_email: values.teacherEmail
   };
 }
@@ -969,7 +1303,24 @@ function statusLabel(status: string) {
     duplicate: "Duplicado",
     skipped: "Omitido",
     completed: "Completado",
-    partially_completed: "Parcial"
+    partially_completed: "Parcial",
+    queued: "En cola",
+    processing: "Procesando"
   };
   return labels[status] ?? status;
+}
+
+function statusBadgeClass(status: string) {
+  if (status === "created" || status === "completed") return "bg-green-100 text-green-800";
+  if (status === "failed") return "bg-red-100 text-red-800";
+  if (status === "processing" || status === "queued") return "bg-blue-100 text-blue-800";
+  return "bg-amber-100 text-amber-800";
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return "Sin fecha de inicio";
+  return new Intl.DateTimeFormat("es-NI", {
+    dateStyle: "short",
+    timeStyle: "short"
+  }).format(new Date(value));
 }
