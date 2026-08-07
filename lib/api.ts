@@ -277,6 +277,46 @@ export type EmailTestResult = {
   message: string;
 };
 
+export type TeacherTrackingCourse = {
+  course_id: number;
+  course_fullname: string;
+  course_shortname: string;
+  category_path: string[];
+  teacher_fullname?: string | null;
+  teacher_username?: string | null;
+  role: string;
+  last_course_access_at?: string | null;
+  last_site_access_at?: string | null;
+  status: string;
+};
+
+export type TeacherTrackingItem = {
+  email: string;
+  fullname?: string | null;
+  username?: string | null;
+  last_site_access_at?: string | null;
+  courses_count: number;
+  courses_without_access: number;
+  status: string;
+  courses: TeacherTrackingCourse[];
+};
+
+export type TeacherTrackingResult = {
+  category_moodle_id: number;
+  category_path: string[];
+  summary: {
+    requested: number;
+    unique_emails: number;
+    duplicates_ignored: number;
+    found_teachers: number;
+    not_found: number;
+    courses_analyzed: number;
+    course_teacher_matches: number;
+    without_course_access: number;
+  };
+  items: TeacherTrackingItem[];
+};
+
 export type AcademicPlanningRow = {
   period: string;
   area?: string | null;

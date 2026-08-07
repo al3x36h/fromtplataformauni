@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   BookOpen,
   BarChart3,
+  Activity,
   ClipboardList,
   ChevronLeft,
   ChevronRight,
@@ -22,6 +23,7 @@ const nav = [
   { href: "/analytics", label: "Analitica", icon: BarChart3 },
   { href: "/categories", label: "Categorias", icon: FolderTree },
   { href: "/courses", label: "Cursos", icon: BookOpen },
+  { href: "/teacher-tracking", label: "Seguimiento docente", icon: Activity },
   { href: "/enrolments/course", label: "Matricular", icon: UserPlus },
   { href: "/settings/moodle", label: "Moodle", icon: Settings }
 ];
