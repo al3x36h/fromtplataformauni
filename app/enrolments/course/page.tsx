@@ -10,7 +10,7 @@ import {
   type CourseListItem,
   type EmailTestResult
 } from "@/lib/api";
-import { CheckCircle2, ExternalLink, Loader2, MailCheck, Search, Send } from "lucide-react";
+import { CheckCircle2, Download, ExternalLink, Loader2, MailCheck, Search, Send } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 const EXAMPLE = `Victoria de los Angeles Gonzalez Gutierrez\tvictoria.gonzalez@example.edu.ni
@@ -24,6 +24,7 @@ export default function CourseEnrolmentPage() {
   const [testRecipient, setTestRecipient] = useState("");
   const [sendEmail, setSendEmail] = useState(true);
   const [createMissingUsers, setCreateMissingUsers] = useState(true);
+  const [includeCredentialsReport, setIncludeCredentialsReport] = useState(false);
   const [loadingCourses, setLoadingCourses] = useState(true);
   const [validating, setValidating] = useState(false);
   const [testingEmail, setTestingEmail] = useState(false);
@@ -51,7 +52,7 @@ export default function CourseEnrolmentPage() {
   useEffect(() => {
     setPreview(null);
     setResult(null);
-  }, [selectedCourse?.moodle_id, rawPeople, createMissingUsers]);
+  }, [selectedCourse?.moodle_id, rawPeople, createMissingUsers, includeCredentialsReport]);
 
   const courseOptions = useMemo(() => {
     const term = courseSearch.trim().toLowerCase();
@@ -83,7 +84,8 @@ export default function CourseEnrolmentPage() {
             course_id: selectedCourse.moodle_id,
             people,
             send_email: sendEmail,
-            create_missing_users: createMissingUsers
+            create_missing_users: createMissingUsers,
+            include_credentials_report: includeCredentialsReport
           })
         })
       );
@@ -107,7 +109,8 @@ export default function CourseEnrolmentPage() {
             course_id: selectedCourse.moodle_id,
             people,
             send_email: sendEmail,
-            create_missing_users: createMissingUsers
+            create_missing_users: createMissingUsers,
+            include_credentials_report: includeCredentialsReport
           })
         })
       );
@@ -222,6 +225,20 @@ export default function CourseEnrolmentPage() {
               />
               Crear cuenta manual si el estudiante no existe en Moodle
             </label>
+            <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={includeCredentialsReport}
+                onChange={(event) => setIncludeCredentialsReport(event.target.checked)}
+                className="h-4 w-4"
+              />
+              Generar CSV de usuarios creados con clave
+            </label>
+            {includeCredentialsReport && (
+              <p className="mt-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                La clave solo estara disponible al finalizar esta ejecucion. No se guarda en la base de datos.
+              </p>
+            )}
           </div>
 
           <div className="rounded border border-institutional-extralightblue bg-blue-50 p-4">
@@ -359,6 +376,16 @@ export default function CourseEnrolmentPage() {
                   {result.skipped ? ` · ${result.skipped} pendientes` : ""}
                 </p>
               </div>
+              {createdCredentialRows(result).length > 0 && selectedCourse && (
+                <button
+                  type="button"
+                  onClick={() => downloadCredentialsCsv(result, selectedCourse)}
+                  className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded border border-slate-300 px-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                >
+                  <Download className="h-4 w-4" />
+                  CSV credenciales
+                </button>
+              )}
             </div>
             <div className="mt-4 overflow-x-auto rounded border border-slate-200">
               <table className="min-w-full text-left text-sm">
@@ -472,6 +499,51 @@ function AuthBadge({ authMethod }: { authMethod?: string | null }) {
   const label = isOpenId ? "OpenID" : authMethod || "Manual";
   const styles = isOpenId ? "bg-blue-100 text-blue-800" : "bg-slate-100 text-slate-700";
   return <span className={`rounded-full px-2 py-1 text-xs font-semibold ${styles}`}>{label}</span>;
+}
+
+function createdCredentialRows(result: CourseEnrolmentResult) {
+  return result.items.filter((item) => item.generated_password);
+}
+
+function downloadCredentialsCsv(result: CourseEnrolmentResult, course: CourseListItem) {
+  downloadCsv(
+    `credenciales-${course.shortname}.csv`,
+    ["nombre", "correo", "usuario", "clave", "curso", "shortname", "estado", "correo_enviado", "mensaje"],
+    createdCredentialRows(result).map((item) => [
+      item.fullname,
+      item.email,
+      item.email.toLowerCase(),
+      item.generated_password ?? "",
+      course.fullname,
+      course.shortname,
+      statusLabel(item.status),
+      item.password_sent ? "Si" : "No",
+      item.message
+    ])
+  );
+}
+
+function statusLabel(status: string) {
+  if (status === "created_enrolled") return "Creado y matriculado";
+  if (status === "email_failed") return "Creado y matriculado; correo fallo";
+  if (status === "enrolled") return "Matriculado";
+  if (status === "already_enrolled") return "Ya estaba matriculado";
+  if (status === "pending_identity") return "Pendiente OpenID";
+  return "Fallido";
+}
+
+function downloadCsv(filename: string, headers: string[], rows: string[][]) {
+  const csv = [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+  const url = URL.createObjectURL(new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function csvCell(value: string) {
+  return `"${value.replaceAll('"', '""')}"`;
 }
 
 function PreviewStat({ label, value }: { label: string; value: number }) {

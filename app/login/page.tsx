@@ -1,12 +1,14 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { LockKeyhole } from "lucide-react";
 import { apiFetch, type CurrentUser } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("ChangeMe123!");
   const [error, setError] = useState<string | null>(null);
@@ -70,6 +72,12 @@ export default function LoginPage() {
               required
             />
           </div>
+
+          {searchParams.get("expired") === "1" && !error && (
+            <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              Tu sesion expiro. Inicia sesion nuevamente.
+            </p>
+          )}
 
           {error && (
             <p className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">

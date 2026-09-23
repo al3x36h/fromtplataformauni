@@ -268,6 +268,7 @@ export type CourseEnrolmentResult = {
     moodle_user_id?: number | null;
     auth_method?: string | null;
     password_sent: boolean;
+    generated_password?: string | null;
     message: string;
   }>;
 };
@@ -336,6 +337,11 @@ export type AcademicPlanningRow = {
   student_idnumber?: string | null;
   student_enrolment_key?: string | null;
   template_shortname?: string | null;
+  category_moodle_id_override?: number | null;
+  skip_idnumber?: boolean;
+  fullname_override?: string | null;
+  shortname_override?: string | null;
+  idnumber_override?: string | null;
 };
 
 export type AutomationPreviewResult = {
@@ -362,7 +368,7 @@ export type AutomationPreviewResult = {
     key: string;
     fullname: string;
     shortname: string;
-    idnumber: string;
+    idnumber?: string | null;
     category_path: string[];
     category_moodle_id?: number | null;
     template_shortname: string;
@@ -541,6 +547,11 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
       ...(init?.headers ?? {})
     }
   });
+  if (response.status === 401 && typeof window !== "undefined" && !path.startsWith("/auth/login")) {
+    document.cookie = "session=; Max-Age=0; path=/";
+    window.location.href = "/login?expired=1";
+    throw new Error("Sesion expirada");
+  }
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
     throw new Error(payload?.detail ?? `HTTP ${response.status}`);

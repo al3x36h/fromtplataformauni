@@ -5,6 +5,7 @@ import { GlobalFilters } from "@/components/analytics/global-filters";
 import { MetricCard } from "@/components/analytics/metric-card";
 import { apiFetch, type AcademicAnalyticsDashboard, type SyncStatus } from "@/lib/api";
 import { Database, RefreshCw, Users } from "lucide-react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 
@@ -109,6 +110,21 @@ function AnalyticsContent() {
   return (
     <AppShell title="Analitica academica">
       <div className="space-y-6">
+        <div className="flex border-b border-slate-200 text-sm font-semibold">
+          <Link
+            href="/analytics"
+            className="border-b-2 border-institutional-primary px-4 py-2 text-institutional-primary"
+          >
+            Resumen
+          </Link>
+          <Link
+            href="/analytics/report"
+            className="px-4 py-2 text-slate-600 transition-colors hover:text-slate-950"
+          >
+            Reporte
+          </Link>
+        </div>
+
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div>
             <h2 className="text-lg font-semibold text-slate-950">Analitica academica</h2>

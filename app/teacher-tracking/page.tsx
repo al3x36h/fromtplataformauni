@@ -16,10 +16,20 @@ const EXAMPLE = `hank.espinoza@uni.edu.ni
 juan.pavon@uni.edu.ni
 javier.vanega@uni.edu.ni`;
 
+type RoleFilter = "teacher" | "student" | "manager" | "all";
+
+const ROLE_OPTIONS: Array<{ value: RoleFilter; label: string }> = [
+  { value: "teacher", label: "Docentes" },
+  { value: "student", label: "Estudiantes" },
+  { value: "manager", label: "Gestores" },
+  { value: "all", label: "Todos" }
+];
+
 export default function TeacherTrackingPage() {
   const [categories, setCategories] = useState<CategoryNode[]>([]);
   const [category, setCategory] = useState<CategoryNode | null>(null);
   const [rawEmails, setRawEmails] = useState("");
+  const [roleFilters, setRoleFilters] = useState<RoleFilter[]>(["teacher"]);
   const [result, setResult] = useState<TeacherTrackingResult | null>(null);
   const [loadingCategories, setLoadingCategories] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
@@ -46,7 +56,8 @@ export default function TeacherTrackingPage() {
           method: "POST",
           body: JSON.stringify({
             category_moodle_id: category.moodle_id,
-            emails: pastedEmails
+            emails: pastedEmails,
+            roles: roleFilters
           })
         })
       );
@@ -64,12 +75,12 @@ export default function TeacherTrackingPage() {
       teacherSourceCsvRows(sourceRow, itemsByEmail.get(sourceRow.email.toLowerCase()), onlyWithoutAccess)
     );
     downloadCsv(
-      onlyWithoutAccess ? "seguimiento-docente-sin-acceso.csv" : "seguimiento-docente.csv",
+      onlyWithoutAccess ? "seguimiento-participantes-sin-acceso.csv" : "seguimiento-participantes.csv",
       [
         "fila_origen",
         "correo_ingresado",
         "duplicado",
-        "docente",
+        "participante",
         "correo",
         "usuario",
         "curso",
@@ -108,10 +119,34 @@ export default function TeacherTrackingPage() {
             />
           )}
 
+          <div className="rounded border border-slate-200 bg-white p-4">
+            <h3 className="text-sm font-semibold text-slate-950">Buscar como</h3>
+            <div className="mt-3 grid gap-2 sm:grid-cols-4">
+              {ROLE_OPTIONS.map((option) => (
+                <label
+                  key={option.value}
+                  className={`flex h-10 cursor-pointer items-center gap-2 rounded border px-3 text-sm transition-colors ${
+                    roleFilters.includes(option.value)
+                      ? "border-institutional-primary bg-blue-50 text-institutional-primary"
+                      : "border-slate-200 text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={roleFilters.includes(option.value)}
+                    onChange={() => setRoleFilters(toggleRoleFilter(roleFilters, option.value))}
+                    className="h-4 w-4 accent-institutional-primary"
+                  />
+                  <span className="font-medium">{option.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
           <div className="rounded border border-slate-200 bg-slate-50 p-4">
             <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
               <div>
-                <h3 className="text-sm font-semibold text-slate-950">Correos docentes</h3>
+                <h3 className="text-sm font-semibold text-slate-950">Correos a consultar</h3>
                 <p className="mt-1 text-sm text-slate-600">Pega uno por linea. Los repetidos se ignoran automaticamente.</p>
               </div>
               <button
@@ -199,7 +234,7 @@ export default function TeacherTrackingPage() {
             </div>
             <div className="mt-4 divide-y divide-slate-200 rounded border border-slate-200">
               {result.items.map((item) => (
-                <TeacherRow key={item.email} item={item} />
+                <TeacherRow key={item.email} item={item} noMatchText={`No aparece como ${roleFilterLabel(roleFilters).toLowerCase()} dentro de la categoria seleccionada.`} />
               ))}
             </div>
           </section>
@@ -209,7 +244,7 @@ export default function TeacherTrackingPage() {
   );
 }
 
-function TeacherRow({ item }: { item: TeacherTrackingItem }) {
+function TeacherRow({ item, noMatchText }: { item: TeacherTrackingItem; noMatchText: string }) {
   return (
     <details className="group bg-white open:bg-slate-50">
       <summary className="grid cursor-pointer gap-3 px-4 py-3 text-sm hover:bg-slate-50 md:grid-cols-[minmax(0,1fr)_120px_170px_130px] md:items-center">
@@ -217,7 +252,7 @@ function TeacherRow({ item }: { item: TeacherTrackingItem }) {
           <p className="font-semibold text-slate-950">{item.fullname || item.email}</p>
           <p className="truncate text-xs text-slate-500">{item.email}</p>
         </div>
-        <p className="text-slate-700">{item.status === "encontrado" ? `${item.courses_count} cursos` : "Sin cursos asignados"}</p>
+        <p className="text-slate-700">{item.status === "encontrado" ? `${item.courses_count} cursos` : "Sin coincidencias"}</p>
         <p className="text-slate-700">{item.status === "encontrado" ? formatDate(item.last_site_access_at) : "No disponible"}</p>
         <StatusBadge status={item.status} withoutAccess={item.courses_without_access} />
       </summary>
@@ -258,7 +293,7 @@ function TeacherRow({ item }: { item: TeacherTrackingItem }) {
             </tbody>
           </table>
         ) : (
-          <p className="px-4 py-5 text-sm text-slate-500">No aparece como docente dentro de la categoria seleccionada.</p>
+          <p className="px-4 py-5 text-sm text-slate-500">{noMatchText}</p>
         )}
       </div>
     </details>
@@ -276,7 +311,7 @@ function Summary({ label, value }: { label: string; value: number }) {
 
 function StatusBadge({ status, withoutAccess }: { status: string; withoutAccess: number }) {
   if (status !== "encontrado") {
-    return <span className="w-fit rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">No encontrado</span>;
+    return <span className="w-fit rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">Sin coincidencia</span>;
   }
   if (withoutAccess > 0) {
     return <span className="w-fit rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">{withoutAccess} sin acceso</span>;
@@ -297,6 +332,17 @@ type SourceEmailRow = {
   email: string;
   duplicate: boolean;
 };
+
+function toggleRoleFilter(current: RoleFilter[], value: RoleFilter): RoleFilter[] {
+  if (value === "all") return ["all"];
+  const next = current.includes(value) ? current.filter((item) => item !== value) : [...current.filter((item) => item !== "all"), value];
+  return next.length ? next : ["teacher"];
+}
+
+function roleFilterLabel(filters: RoleFilter[]) {
+  if (filters.includes("all")) return "Participante";
+  return filters.map((filter) => ROLE_OPTIONS.find((option) => option.value === filter)?.label ?? filter).join(" o ");
+}
 
 function sourceEmailRows(rawEmails: string): SourceEmailRow[] {
   const seen = new Set<string>();

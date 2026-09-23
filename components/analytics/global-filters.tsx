@@ -5,7 +5,20 @@ import { Filter, RotateCcw } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 
-export function GlobalFilters() {
+type GlobalFilterDefaults = {
+  date_from?: string;
+  date_to?: string;
+  unique_students?: boolean;
+  exclude_course_ids?: string;
+};
+
+export function GlobalFilters({
+  defaults,
+  showStudentReportControls = false
+}: {
+  defaults?: GlobalFilterDefaults;
+  showStudentReportControls?: boolean;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -42,7 +55,7 @@ export function GlobalFilters() {
         <input
           name="date_from"
           type="date"
-          defaultValue={params.get("date_from") ?? ""}
+          defaultValue={params.get("date_from") ?? defaults?.date_from ?? ""}
           className="mt-1 h-10 w-full rounded border border-slate-300 px-3"
         />
       </label>
@@ -51,7 +64,7 @@ export function GlobalFilters() {
         <input
           name="date_to"
           type="date"
-          defaultValue={params.get("date_to") ?? ""}
+          defaultValue={params.get("date_to") ?? defaults?.date_to ?? ""}
           className="mt-1 h-10 w-full rounded border border-slate-300 px-3"
         />
       </label>
@@ -146,6 +159,29 @@ export function GlobalFilters() {
         />
         Comparar periodo anterior
       </label>
+      {showStudentReportControls && (
+        <>
+          <label className="mt-6 flex h-10 items-center gap-2 text-sm font-medium text-slate-700">
+            <input
+              name="unique_students"
+              value="true"
+              type="checkbox"
+              defaultChecked={params.get("unique_students") === "true" || (!params.has("unique_students") && defaults?.unique_students)}
+              className="h-4 w-4 rounded border-slate-300"
+            />
+            Estudiantes unicos
+          </label>
+          <label className="text-sm font-medium text-slate-700">
+            Excluir cursos
+            <input
+              name="exclude_course_ids"
+              defaultValue={params.get("exclude_course_ids") ?? defaults?.exclude_course_ids ?? ""}
+              placeholder="Ej. 1032"
+              className="mt-1 h-10 w-full rounded border border-slate-300 px-3"
+            />
+          </label>
+        </>
+      )}
       <button
         type="submit"
         className="mt-6 flex h-10 cursor-pointer items-center justify-center gap-2 rounded bg-institutional-primary px-4 text-sm font-semibold text-white transition-colors hover:bg-institutional-darkblue"

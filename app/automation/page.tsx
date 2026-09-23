@@ -2,6 +2,7 @@
 
 import { AppShell } from "@/components/app-shell";
 import { BulkDuplication } from "@/components/automation/bulk-duplication";
+import { CategoryTreeCombobox } from "@/components/categories/category-tree-combobox";
 import {
   API_BASE_URL,
   apiFetch,
@@ -9,9 +10,10 @@ import {
   type AcademicPlanningRow,
   type AutomationCategoryExecutionResult,
   type AutomationCourseJobStatus,
-  type AutomationPreviewResult
+  type AutomationPreviewResult,
+  type CategoryNode
 } from "@/lib/api";
-import { Clipboard, ClipboardCheck, Download, FolderPlus, Play, RefreshCw, Search } from "lucide-react";
+import { Clipboard, ClipboardCheck, Download, FolderPlus, Play, RefreshCw, Search, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 
 const baseHeaders = ["period", "area", "career", "anio", "subject", "group"];
@@ -25,7 +27,7 @@ const sample = buildSample({
 });
 
 export default function AutomationPage() {
-  const [activeTab, setActiveTab] = useState<"planning" | "preview" | "executions" | "duplication">("planning");
+  const [activeTab, setActiveTab] = useState<"planning" | "training" | "preview" | "executions" | "duplication">("planning");
   const [raw, setRaw] = useState(sample);
   const [preview, setPreview] = useState<AutomationPreviewResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -264,6 +266,17 @@ export default function AutomationPage() {
           </button>
           <button
             type="button"
+            onClick={() => setActiveTab("training")}
+            className={`h-10 cursor-pointer rounded px-4 text-sm font-semibold ${
+              activeTab === "training"
+                ? "bg-institutional-primary text-white"
+                : "text-slate-700 hover:bg-slate-100"
+            }`}
+          >
+            Capacitaciones
+          </button>
+          <button
+            type="button"
             onClick={() => setActiveTab("executions")}
             className={`h-10 cursor-pointer rounded px-4 text-sm font-semibold ${
               activeTab === "executions"
@@ -286,6 +299,7 @@ export default function AutomationPage() {
           </button>
         </div>
         {activeTab === "duplication" && <BulkDuplication />}
+        {activeTab === "training" && <TrainingCoursesPanel />}
         {activeTab === "executions" && (
           <ExecutionsPanel
             job={courseJob}
@@ -534,6 +548,422 @@ export default function AutomationPage() {
         )}
       </div>
     </AppShell>
+  );
+}
+
+type TrainingTeacher = {
+  index: number;
+  name: string;
+  email: string;
+};
+
+type TrainingConfig = {
+  templateShortname: string;
+  titlePrefix: string;
+  groupLabel: string;
+};
+
+function TrainingCoursesPanel() {
+  const [config, setConfig] = useState<TrainingConfig>({
+    templateShortname: defaultTemplateShortname,
+    titlePrefix: "Espacio Moodle de:",
+    groupLabel: "GN N°02"
+  });
+  const [categories, setCategories] = useState<CategoryNode[]>([]);
+  const [targetCategory, setTargetCategory] = useState<CategoryNode | null>(null);
+  const [rawTeachers, setRawTeachers] = useState("");
+  const [preview, setPreview] = useState<AutomationPreviewResult | null>(null);
+  const [job, setJob] = useState<AutomationCourseJobStatus | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [lastRows, setLastRows] = useState<AcademicPlanningRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const teachers = parseTrainingTeachers(rawTeachers);
+  const rows = targetCategory ? buildTrainingRows(config, teachers, targetCategory) : [];
+  const readyKeys = preview ? creatableCourseKeys(preview) : [];
+  const selectedReadyCount = readyKeys.filter((key) => selected.has(key)).length;
+  const allSelected = readyKeys.length > 0 && readyKeys.every((key) => selected.has(key));
+
+  function updateConfig(key: keyof TrainingConfig, value: string) {
+    setConfig((current) => ({ ...current, [key]: value }));
+  }
+
+  async function loadCategories(refresh = false) {
+    setSyncing(true);
+    setError(null);
+    try {
+      setCategories(await apiFetch<CategoryNode[]>(`/categories/tree${refresh ? "?refresh=true" : ""}`));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudieron cargar las categorias");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  function applyTrainingPreview(nextPreview: AutomationPreviewResult, sourceRows: AcademicPlanningRow[]) {
+    setPreview(nextPreview);
+    setLastRows(sourceRows);
+    setSelected(new Set(creatableCourseKeys(nextPreview)));
+  }
+
+  async function generateTrainingPreview(sourceRows = rows) {
+    if (!targetCategory?.moodle_id) {
+      setError("Selecciona la categoria Moodle donde se crearan las aulas.");
+      return;
+    }
+    if (sourceRows.length === 0) {
+      setError("Pega al menos un docente con correo para generar las aulas.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const nextPreview = await apiFetch<AutomationPreviewResult>("/automation/preview", {
+        method: "POST",
+        body: JSON.stringify({ rows: sourceRows })
+      });
+      applyTrainingPreview(nextPreview, sourceRows);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo generar la vista previa de capacitaciones");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function syncCategoriesAndPreview() {
+    await loadCategories(true);
+    if (targetCategory && teachers.length > 0) await generateTrainingPreview(rows);
+  }
+
+  async function createTrainingCourses() {
+    const sourceRows = lastRows.length ? lastRows : rows;
+    const courseKeys = readyKeys.filter((key) => selected.has(key));
+    if (sourceRows.length === 0 || courseKeys.length === 0) return;
+    setCreating(true);
+    setError(null);
+    try {
+      setJob(
+        await apiFetch<AutomationCourseJobStatus>("/automation/courses/jobs", {
+          method: "POST",
+          body: JSON.stringify({ rows: sourceRows, course_keys: courseKeys })
+        })
+      );
+    } catch (err) {
+      setCreating(false);
+      setError(err instanceof Error ? err.message : "No se pudo iniciar la creacion de capacitaciones");
+    }
+  }
+
+  async function retryFailedTrainingCourses() {
+    if (!job || job.failed === 0) return;
+    setCreating(true);
+    setError(null);
+    try {
+      setJob(
+        await apiFetch<AutomationCourseJobStatus>(`/automation/courses/jobs/${job.id}/retry`, {
+          method: "POST"
+        })
+      );
+    } catch (err) {
+      setCreating(false);
+      setError(err instanceof Error ? err.message : "No se pudo reintentar el lote");
+    }
+  }
+
+  useEffect(() => {
+    loadCategories();
+  }, []);
+
+  useEffect(() => {
+    setPreview(null);
+    setSelected(new Set());
+    setJob(null);
+    setLastRows([]);
+  }, [config.groupLabel, config.templateShortname, config.titlePrefix, rawTeachers, targetCategory?.moodle_id]);
+
+  useEffect(() => {
+    if (!job || !["queued", "processing"].includes(job.status)) return;
+    let cancelled = false;
+    const timer = window.setInterval(async () => {
+      try {
+        const nextJob = await apiFetch<AutomationCourseJobStatus>(`/automation/courses/jobs/${job.id}`);
+        if (cancelled) return;
+        setJob(nextJob);
+        if (!["queued", "processing"].includes(nextJob.status)) {
+          setCreating(false);
+          window.clearInterval(timer);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setCreating(false);
+          setError(err instanceof Error ? err.message : "No se pudo consultar el avance del lote");
+        }
+      }
+    }, 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [job?.id, job?.status]);
+
+  return (
+    <section className="space-y-5">
+      <div className="rounded border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex items-start gap-3">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded bg-institutional-primary text-white">
+            <Users className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-slate-950">Capacitaciones</h2>
+            <p className="mt-1 max-w-4xl text-sm text-slate-600">
+              Crea un aula por docente desde una plantilla Moodle y matricula a cada docente en su propia aula.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="space-y-5">
+          <section className="rounded border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+              <div>
+                <h3 className="text-base font-semibold text-slate-950">Destino y plantilla</h3>
+                <p className="mt-1 text-sm text-slate-600">
+                  La categoria seleccionada es donde Moodle creara los espacios virtuales.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => loadCategories(true)}
+                disabled={syncing}
+                className="flex h-9 cursor-pointer items-center justify-center gap-2 rounded border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+                {syncing ? "Actualizando..." : "Actualizar categorias"}
+              </button>
+            </div>
+            <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_260px]">
+              <CategoryTreeCombobox
+                categories={categories}
+                value={targetCategory?.moodle_id}
+                onChange={setTargetCategory}
+                label="Categoria destino"
+                compact
+              />
+              <div className="grid gap-3">
+              <TrainingInput
+                label="Prefijo de nombre"
+                value={config.titlePrefix}
+                onChange={(value) => updateConfig("titlePrefix", value)}
+              />
+              <TrainingInput
+                label="Plantilla"
+                value={config.templateShortname}
+                onChange={(value) => updateConfig("templateShortname", value)}
+              />
+              <TrainingInput
+                label="Grupo"
+                value={config.groupLabel}
+                onChange={(value) => updateConfig("groupLabel", value)}
+              />
+              </div>
+            </div>
+            <div className="mt-3 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+              Ruta destino:{" "}
+              <span className="font-semibold text-slate-900">
+                {targetCategory ? targetCategory.path.join(" / ") : "Selecciona una categoria"}
+              </span>
+            </div>
+          </section>
+
+          <section className="rounded border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+              <div>
+                <h3 className="text-base font-semibold text-slate-950">Docentes</h3>
+                <p className="mt-1 text-sm text-slate-600">
+                  Pega columnas de nombre y correo desde Excel. Se ignoran filas sin correo.
+                </p>
+              </div>
+              <span className="rounded bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
+                {teachers.length} detectados
+              </span>
+            </div>
+            <textarea
+              value={rawTeachers}
+              onChange={(event) => setRawTeachers(event.target.value)}
+              rows={10}
+              placeholder={"Nombre\tCorreo\nJavier Antonio Pavon Gaitan\tjavier.pavon@uni.edu.ni"}
+              className="mt-4 w-full rounded border border-slate-300 px-3 py-2 font-mono text-sm outline-none focus:border-institutional-primary focus:ring-1 focus:ring-institutional-primary"
+            />
+            {teachers.length > 0 && (
+              <div className="mt-3 max-h-48 overflow-auto rounded border border-slate-200">
+                {teachers.slice(0, 50).map((teacher) => (
+                  <div
+                    key={`${teacher.index}:${teacher.email}`}
+                    className="grid gap-1 border-b border-slate-100 px-3 py-2 text-sm last:border-b-0 sm:grid-cols-[minmax(0,1fr)_minmax(0,260px)]"
+                  >
+                    <span className="truncate font-semibold text-slate-800">{teacher.name}</span>
+                    <span className="truncate text-slate-600">{teacher.email}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {error && (
+              <p className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {error}
+              </p>
+            )}
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => generateTrainingPreview()}
+                disabled={loading || teachers.length === 0 || !targetCategory}
+                className="flex h-10 cursor-pointer items-center justify-center gap-2 rounded bg-institutional-primary px-4 text-sm font-semibold text-white hover:bg-institutional-darkblue disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                <Search className="h-4 w-4" />
+                {loading ? "Validando..." : "Generar vista previa"}
+              </button>
+              <button
+                type="button"
+                onClick={syncCategoriesAndPreview}
+                disabled={syncing || loading || teachers.length === 0}
+                className="flex h-10 cursor-pointer items-center justify-center gap-2 rounded border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+                {syncing ? "Refrescando..." : "Refrescar categorias"}
+              </button>
+            </div>
+          </section>
+        </div>
+
+        <aside className="rounded border border-slate-200 bg-white p-5 shadow-sm">
+          <h3 className="text-base font-semibold text-slate-950">Formato generado</h3>
+          <dl className="mt-4 space-y-3 text-sm">
+            <div>
+              <dt className="text-xs font-semibold uppercase text-slate-500">Fullname</dt>
+              <dd className="mt-1 text-slate-800">
+                {config.titlePrefix} Nombre Docente {config.groupLabel}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold uppercase text-slate-500">Shortname</dt>
+              <dd className="mt-1 text-slate-800">
+                {config.titlePrefix} Nombre Docente {config.groupLabel}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold uppercase text-slate-500">Ejecucion</dt>
+              <dd className="mt-1 text-slate-800">Duplica desde plantilla y matricula docente por REST.</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold uppercase text-slate-500">Destino</dt>
+              <dd className="mt-1 text-slate-800">
+                {targetCategory ? targetCategory.name : "Pendiente de seleccionar"}
+              </dd>
+            </div>
+          </dl>
+        </aside>
+      </div>
+
+      {preview && (
+        <section className="rounded border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
+            <div>
+              <h3 className="text-base font-semibold text-slate-950">Vista previa de capacitaciones</h3>
+              <p className="text-sm text-slate-600">
+                {preview.courses.length} aulas propuestas · {selectedReadyCount} listas para crear
+              </p>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  disabled={readyKeys.length === 0}
+                  onChange={() => setSelected(allSelected ? new Set() : new Set(readyKeys))}
+                  className="h-4 w-4 rounded border-slate-300 disabled:opacity-50"
+                />
+                Seleccionar todo
+              </label>
+              <button
+                type="button"
+                onClick={createTrainingCourses}
+                disabled={creating || selectedReadyCount === 0}
+                className="flex h-10 cursor-pointer items-center justify-center gap-2 rounded bg-institutional-primary px-4 text-sm font-semibold text-white hover:bg-institutional-darkblue disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                <Play className="h-4 w-4" />
+                {creating ? "Creando..." : `Crear y matricular ${selectedReadyCount}`}
+              </button>
+            </div>
+          </div>
+          {preview.warnings.length > 0 && (
+            <div className="mt-4 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              {preview.warnings.map((warning) => (
+                <p key={warning}>{warning}</p>
+              ))}
+            </div>
+          )}
+          <div className="mt-4 space-y-2">
+            {preview.courses.map((course) => (
+              <label
+                key={course.key}
+                className="grid cursor-pointer gap-3 rounded border border-slate-200 p-3 text-sm hover:bg-slate-50 sm:grid-cols-[24px_minmax(0,1fr)_160px]"
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.has(course.key)}
+                  disabled={course.status !== "ready" || course.category_moodle_id == null}
+                  onChange={() => {
+                    const next = new Set(selected);
+                    if (next.has(course.key)) next.delete(course.key);
+                    else next.add(course.key);
+                    setSelected(next);
+                  }}
+                  className="mt-1 h-4 w-4 rounded border-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
+                />
+                <div className="min-w-0">
+                  <p className="truncate font-semibold text-slate-950">{course.fullname}</p>
+                  <p className="mt-1 truncate font-mono text-xs text-slate-600">{course.shortname}</p>
+                  <p className="mt-1 truncate text-xs text-slate-500">{course.category_path.join(" / ")}</p>
+                  {course.existing_reason && (
+                    <p className="mt-1 text-xs font-semibold text-amber-700">{course.existing_reason}</p>
+                  )}
+                </div>
+                <span className={`h-fit justify-self-start rounded px-2 py-1 text-xs font-semibold ${statusBadgeClass(course.status)}`}>
+                  {statusLabel(course.status)}
+                </span>
+              </label>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {job && <CourseExecutionSummary job={job} creating={creating} onRetry={retryFailedTrainingCourses} />}
+    </section>
+  );
+}
+
+function TrainingInput({
+  label,
+  value,
+  onChange
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block text-sm">
+      <span className="font-semibold text-slate-700">{label}</span>
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 h-10 w-full rounded border border-slate-300 px-3 text-sm outline-none focus:border-institutional-primary focus:ring-1 focus:ring-institutional-primary"
+      />
+    </label>
   );
 }
 
@@ -1162,9 +1592,88 @@ function parsePlanningRows(raw: string): AcademicPlanningRow[] {
       student_username: record.student_username || null,
       student_idnumber: record.student_idnumber || null,
       student_enrolment_key: record.student_enrolment_key || null,
-      template_shortname: record.template_shortname || null
+      template_shortname: record.template_shortname || null,
+      category_moodle_id_override: Number(record.category_moodle_id_override) || null,
+      skip_idnumber: ["1", "true", "si", "yes"].includes((record.skip_idnumber ?? "").toLowerCase()),
+      fullname_override: record.fullname_override || null,
+      shortname_override: record.shortname_override || null,
+      idnumber_override: record.idnumber_override || null
     };
   });
+}
+
+function parseTrainingTeachers(raw: string): TrainingTeacher[] {
+  const seen = new Set<string>();
+  return raw
+    .split(/\r?\n/)
+    .map((line, index) => parseTrainingTeacherLine(line, index + 1))
+    .filter((teacher): teacher is TrainingTeacher => {
+      if (!teacher || seen.has(teacher.email.toLowerCase())) return false;
+      seen.add(teacher.email.toLowerCase());
+      return true;
+    });
+}
+
+function parseTrainingTeacherLine(line: string, index: number): TrainingTeacher | null {
+  const normalizedLine = line.replaceAll("\\@", "@").replaceAll("\u00a0", " ").trim();
+  const emailMatch = normalizedLine.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  if (!emailMatch) return null;
+  const email = emailMatch[0].trim();
+  const cells = normalizedLine
+    .split("|")
+    .map((cell) => cell.trim())
+    .filter(Boolean);
+  const emailIndex = cells.findIndex((cell) => cell.includes(email));
+  const cellName = emailIndex > 0 ? cells[emailIndex - 1] : "";
+  const fallbackName = normalizedLine.slice(0, emailMatch.index).replaceAll("|", " ").trim();
+  const name = cleanText(cellName || fallbackName).replace(/^Nombre$/i, "");
+  if (!name || /^correo$/i.test(name)) return null;
+  return { index, name, email };
+}
+
+function buildTrainingRows(
+  config: TrainingConfig,
+  teachers: TrainingTeacher[],
+  targetCategory: CategoryNode
+): AcademicPlanningRow[] {
+  const usedShortnames = new Set<string>();
+  return teachers.map((teacher, index) => {
+    const fullname = cleanText(`${config.titlePrefix} ${teacher.name} ${config.groupLabel}`);
+    const shortname = uniqueTrainingShortname(fullname, usedShortnames);
+    const path = targetCategory.path;
+    return {
+      period: path[1] ?? targetCategory.name,
+      area: path.length > 2 ? path[2] : null,
+      career: targetCategory.name || "Capacitaciones",
+      anio: null,
+      subject: fullname,
+      group: cleanText(config.groupLabel),
+      teacher_name: teacher.name,
+      teacher_email: teacher.email,
+      template_shortname: cleanText(config.templateShortname) || defaultTemplateShortname,
+      category_moodle_id_override: targetCategory.moodle_id ?? null,
+      skip_idnumber: true,
+      fullname_override: fullname,
+      shortname_override: shortname,
+      idnumber_override: null
+    };
+  });
+}
+
+function uniqueTrainingShortname(fullname: string, usedShortnames: Set<string>) {
+  const base = fullname;
+  let candidate = base;
+  let suffix = 2;
+  while (usedShortnames.has(candidate)) {
+    candidate = `${base} ${suffix}`;
+    suffix += 1;
+  }
+  usedShortnames.add(candidate);
+  return candidate;
+}
+
+function cleanText(value: string) {
+  return value.replace(/\s+/g, " ").trim();
 }
 
 function downloadMoodleSelfEnrolCsv(
