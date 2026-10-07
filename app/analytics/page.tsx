@@ -121,7 +121,13 @@ function AnalyticsContent() {
             href="/analytics/report"
             className="px-4 py-2 text-slate-600 transition-colors hover:text-slate-950"
           >
-            Reporte
+            Estudiantes activos
+          </Link>
+          <Link
+            href="/analytics/report/courses"
+            className="px-4 py-2 text-slate-600 transition-colors hover:text-slate-950"
+          >
+            Aulas creadas
           </Link>
         </div>
 

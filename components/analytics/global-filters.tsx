@@ -8,16 +8,21 @@ import { FormEvent, useEffect, useState } from "react";
 type GlobalFilterDefaults = {
   date_from?: string;
   date_to?: string;
+  date_field?: string;
   unique_students?: boolean;
   exclude_course_ids?: string;
 };
 
 export function GlobalFilters({
   defaults,
-  showStudentReportControls = false
+  showStudentReportControls = false,
+  categoriesEndpoint = "/analytics/categories",
+  showCourseDateField = false,
 }: {
   defaults?: GlobalFilterDefaults;
   showStudentReportControls?: boolean;
+  categoriesEndpoint?: string;
+  showCourseDateField?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -26,13 +31,13 @@ export function GlobalFilters({
   const [courses, setCourses] = useState<CourseFilterOption[]>([]);
 
   useEffect(() => {
-    apiFetch<CategoryAnalytics[]>("/analytics/categories")
+    apiFetch<CategoryAnalytics[]>(categoriesEndpoint)
       .then(setCategories)
       .catch(() => setCategories([]));
     apiFetch<CourseFilterOption[]>("/analytics/courses")
       .then(setCourses)
       .catch(() => setCourses([]));
-  }, []);
+  }, [categoriesEndpoint]);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -47,6 +52,7 @@ export function GlobalFilters({
 
   return (
     <form
+      key={`${pathname}?${params.toString()}`}
       onSubmit={submit}
       className="grid gap-3 rounded border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-2 xl:grid-cols-4"
     >
@@ -68,6 +74,20 @@ export function GlobalFilters({
           className="mt-1 h-10 w-full rounded border border-slate-300 px-3"
         />
       </label>
+      {showCourseDateField && (
+        <label className="text-sm font-medium text-slate-700">
+          Filtrar por fecha de
+          <select
+            name="date_field"
+            defaultValue={params.get("date_field") ?? defaults?.date_field ?? "timemodified"}
+            className="mt-1 h-10 w-full rounded border border-slate-300 px-3"
+          >
+            <option value="timemodified">Ultima modificacion</option>
+            <option value="startdate">Inicio del curso</option>
+            <option value="timecreated">Creacion Moodle</option>
+          </select>
+        </label>
+      )}
       <label className="text-sm font-medium text-slate-700">
         Categoria
         <select
